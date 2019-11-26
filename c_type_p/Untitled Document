@@ -1,0 +1,32 @@
+(py35x64_test) e:\Work\Dev\StackOverflow\q053531795>call "c:\Install\x86\Microsoft\Visual Studio Community\2015\vc\vcvarsall.bat" x64
+
+(py35x64_test) e:\Work\Dev\StackOverflow\q053531795>dir /b
+code.py
+dll.c
+
+(py35x64_test) e:\Work\Dev\StackOverflow\q053531795>cl /nologo /DDLL /MD dll.c  /link /NOLOGO /DLL /OUT:dll.dll
+dll.c
+   Creating library dll.lib and object dll.exp
+
+(py35x64_test) e:\Work\Dev\StackOverflow\q053531795>dir /b
+code.py
+dll.c
+dll.dll
+dll.exp
+dll.lib
+dll.obj
+
+(py35x64_test) e:\Work\Dev\StackOverflow\q053531795>"e:\Work\Dev\VEnvs\py35x64_test\Scripts\python.exe" code.py
+Python 3.5.4 (v3.5.4:3f56838, Aug  8 2017, 02:17:05) [MSC v.1900 64 bit (AMD64)] on win32
+
+effect addr: 0x000001FB25B8CB10 (type: <class '__main__.Effect'>)
+From C - [dll.c] (21) - [test]:  ARG0: [pEffect], ARG1: 0x000001FB25B8CB10
+From C - [dll.c] (22) - [test]:  ARG0: [pEffect->ptr], ARG1: 0x0000000000000000
+From C - [dll.c] (23) - [test]:  ARG0: [&pEffect->ptr], ARG1: 0x000001FB25B8CB10
+From C - [dll.c] (25) - [test]:  ARG0: [new pEffect->ptr], ARG1: 0x00007FFFAFB13000
+140736141012992 <class 'int'>
+effect.ptr: - wrong type
+
+Second time...
+    effect addr: 0x000001FB25B8CB10 (type: <class '__main__.Effect'>)
+Python addrs (irrelevant): effect: 0x000001FB25B8CAC8, effect.ptr: 0x000001FB25BCC9F0

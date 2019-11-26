@@ -1,0 +1,2 @@
+nm -g  /home/sergey/Git/iCubeNS1130CU/test.so | grep name
+
