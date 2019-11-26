@@ -50,6 +50,7 @@ from ctypes import *
 import time
 import threading
 import numpy as np
+import imageio
 
 Modes = {
     0:"320x240",
@@ -63,6 +64,9 @@ Modes = {
     8:"2592x1944",
     9:"3840x2748"
 }
+
+class Effect(Structure):
+    _fields_ = [("ptr", c_void_p)]
 #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.additionnal_import
 
 # Device States Description
@@ -93,7 +97,6 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         del self.attr_image_g_read
         del self.attr_image_b_read
         del self.image_rgb
-        del self.raw
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.delete_device
 
     def init_device(self):
@@ -110,19 +113,13 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         #----- PROTECTED REGION ID(ICubeNS1130CU.init_device) ENABLED START -----#
         #self.so_file = '/home/sergey/bin/TangoServers/iCube/test.so'
         print("Python {:s} on {:s}\n".format(sys.version, sys.platform))
-        self.camera = CDLL('/home/sergey/Git/iCubeNS1130CU/test.so')
+        self.camera = CDLL('/home/sergey/Git/iCubeNS1130CU/temp/test.so')
         self.cam_index=0
         self.connect()
         self.check_camera_mode_trg=True
         self.streaming_trg=False
         self.image_rgb=[[[0]]]
-        self.raw=c_void_p
-        #self.raw_p = self.raw(100)
-        #print self.raw_p
-        #self.raw = (c_ubyte * 3932160)(*map(ord, "This is a test."))
-        self.raw=c_ubyte(3932160)      
-        print self.raw.value
-        #print string_at(self.raw)
+        self.effect = Effect()
         if not 'get_image' in dir(self):
             self.get_image = threading.Thread(target=self.image)
             self.get_image.setDaemon(True)
@@ -179,10 +176,15 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         #----- PROTECTED REGION ID(ICubeNS1130CU.start_stop_streaming_write) ENABLED START -----#
         if self.get_state() == PyTango.DevState.ON:
             if data==True:
-                self.camera._Z12set_callbackiPh.argtypes = [c_int, c_ubyte]
-                callback=self.camera._Z12set_callbackiPh(self.cam_index,self.raw)
+                self.img_buffer  = create_string_buffer( 3932160 )
+                self.mypointer = addressof(self.img_buffer)
+                self.camera._Z12set_callbackiPv.argtypes = [c_int, c_void_p]
+                callback=self.camera._Z12set_callbackiPv(self.cam_index, self.mypointer)
                 streaming=self.camera._Z15start_streamingi(self.cam_index)
+                #for i in range (len(self.img_buffer)):
+                #   print "ir2 nr:", i, "buffer:",self.img_buffer[i]                
                 if callback==0 and streaming==0:
+                    
                     self.streaming_trg=True
             elif data==False:
                 self.streaming_trg=False
@@ -269,6 +271,7 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         elif self.cam_index==98:
             self.set_state(PyTango.DevState.FAULT)
             self.attr_server_message_read="camera not opend"
+
         string_buffers = [create_string_buffer(20) for i in range(2)]
         pointers = (c_char_p*2)(*map(addressof, string_buffers))
         self.camera._Z4nameiPPc(self.cam_index, pointers)
@@ -297,7 +300,13 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
                 while self.streaming_trg==True:
                     time.sleep(1)
                     #print self.image_rgb.shape
-                    print self.raw.value                 
+                    #print("0x{:016X}".format(self.mypointer))
+                    #print("Python addrs (irrelevant): effect: {:s}, effect.ptr: {:s}".format(self.hex64_str(id(self.effect)), self.hex64_str(id(self.effect.ptr))))
+                    for i in range (20):
+                       print "ir2 nr:", i, "buffer:",self.img_buffer[i].decode()
+                    #data = memoryview(cast(self.mypointer, POINTER(c_ubyte*len.value))[0]).tobytes()
+                    #print data
+                    #imageio.imsave('default.tiff', self.img_buffer.decode(]))
             time.sleep(1)
     #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.programmer_methods
 
@@ -395,3 +404,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
