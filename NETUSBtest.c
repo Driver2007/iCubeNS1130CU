@@ -18,6 +18,7 @@ void SaveRaw(unsigned char *buffer, unsigned int buffersize, const char* cName);
 
 //---------------------------------------------------------------------------
 // DEFINES
+
 #define  SAVE_RAW	// save a raw
 #define PRINT_MSG_2SX(ARG0, ARG1) printf("From C - [%s] (%d) - [%s]:  ARG0: [%s], ARG1: 0x%016llX\n", __FILE__, __LINE__, __FUNCTION__, ARG0, (unsigned long long)ARG1)
 static float f = 1.618033;
@@ -165,10 +166,19 @@ int get_exposure(int CamIndex)
 typedef struct Effect {
     void *ptr;
 } Effect;
+
+void test(Effect *pEffect, int null) {
+    PRINT_MSG_2SX("pEffect", pEffect);
+    PRINT_MSG_2SX("pEffect->ptr", pEffect->ptr);
+    PRINT_MSG_2SX("&pEffect->ptr", &pEffect->ptr);
+    pEffect->ptr = !null ? NULL : &f;
+    PRINT_MSG_2SX("new pEffect->ptr", pEffect->ptr);
+}
+
 //----------------------------IMAGE-----------------------------------------------
 //
 
-int GetImage(Effect *buffer, unsigned int buffersize, void *context)
+int GetImage(void *buffer, unsigned int buffersize, void *context)
 {
  
   if(buffersize==0){		// badframe arrived (this happens here, when (REG_CALLBACK_BR_FRAMES==1)
@@ -177,8 +187,8 @@ int GetImage(Effect *buffer, unsigned int buffersize, void *context)
   else				// good frame arrived
   { 
 	nGoodCnt++;
-	printf("%p, Size %d \n\n",buffer, buffersize);
-	PRINT_MSG_2SX("&pbuffer->ptr", &buffer->ptr);
+	printf("%p \n\n",buffer);
+
 	//printf("Size %d \n\n", buffersize);
 	//#ifdef SAVE_RAW
 	//char buf[24];
@@ -191,20 +201,26 @@ int GetImage(Effect *buffer, unsigned int buffersize, void *context)
 }
 //---------------------------------------------------------------------------
 //
-int set_callback(int CamIndex,Effect *buffer)
+int set_callback(int CamIndex,	unsigned char *raw)
 {
 	int result = 0;
 	unsigned int buffersize;
 	void* context;
+	void *buffer;
+	printf("%p \n\n",buffer);
+	raw=(unsigned char*)buffer;
 	// if active, badframes are sent to the callback with buffersize = 0
 	result = NETUSBCAM_SetCamParameter(CamIndex,REG_CALLBACK_BR_FRAMES,1);
 	if(result!=0){
 		printf("Error: REG_CALLBACK_BR_FRAMES; Result = %d\n", result);
-		return 0; } 
+		return 0; 
+		} 
 	result = NETUSBCAM_SetCallback(CamIndex,CALLBACK_RGB,&GetImage,NULL);
 	if(result!=0){
 		printf("Error: SetCallback; Result = %d\n", result);
-		return 0; }
+		return 0;
+		}
+	return result;
 }
 //---------------------------------------------------------------------------
 // save data from callback
