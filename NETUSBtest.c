@@ -80,7 +80,7 @@ int close(int CamIndex)
 int SetMode(int CamIndex, int mode) 
 { 
 	int result = 0; 
-	NETUSBCAM_SetMode(CamIndex, mode); 
+	result=NETUSBCAM_SetMode(CamIndex, mode); 
 	if(result!=0){ 
 		printf("Error: Close; Result = %d\n", result); 
 		return 95; 
@@ -92,7 +92,7 @@ int GetMode(int CamIndex)
 { 
 	int result = 0; 
 	unsigned int mode; 
-	NETUSBCAM_GetMode(CamIndex, &mode);	 
+	result=NETUSBCAM_GetMode(CamIndex, &mode);	 
 	if(result!=0){ 
 		printf("Error: Close; Result = %d\n", result); 
 		return -1; 
@@ -179,14 +179,17 @@ int GetImage(void *buffer, unsigned int buffersize, void *context)
   {  
 	nGoodCnt++; 
 	//printf("\n%p, Size %d \n\n",buffer, buffersize);
+	//for (i=0; i<40;i++){
+	//	printf("%x", ((unsigned char*)buffer)[i]);
+	//}
 	memcpy(global_pointer, buffer, buffersize);
 	//PRINT_MSG_2SX("&pbuffer->ptr", &buffer->ptr); 
 	//printf("Size %d \n\n", buffersize); 
-	//#ifdef SAVE_RAW 
-	//char buf[24]; 
-	//sprintf(buf,"Nr%d.raw",nGoodCnt); 
-	//SaveRaw((unsigned char*)buffer,buffersize,buf); 
-	//#endif 
+	#ifdef SAVE_RAW 
+	char buf[24]; 
+	sprintf(buf,"Nr%d.raw",nGoodCnt); 
+	SaveRaw((unsigned char*)buffer,buffersize,buf); 
+	#endif 
   } 
      
   //printf("Got Image;  GoodFr: %d ,BadFr: %d , Size %d  \n",nGoodCnt,nBadCnt,buffersize);   

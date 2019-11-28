@@ -51,7 +51,7 @@ import time
 import threading
 import numpy as np
 import imageio
-
+import struct
 Modes = {
     0:"320x240",
     1:"640x480",
@@ -64,7 +64,9 @@ Modes = {
     8:"2592x1944",
     9:"3840x2748"
 }
-
+import imageio
+from PIL import Image
+#from PIL import Image
 class Effect(Structure):
     _fields_ = [("ptr", c_void_p)]
 #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.additionnal_import
@@ -113,7 +115,7 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         #----- PROTECTED REGION ID(ICubeNS1130CU.init_device) ENABLED START -----#
         #self.so_file = '/home/sergey/bin/TangoServers/iCube/test.so'
         print("Python {:s} on {:s}\n".format(sys.version, sys.platform))
-        self.camera = CDLL('/home/sergey/Git/iCubeNS1130CU/temp/test.so')
+        self.camera = CDLL('/home/user/Git/iCubeNS1130CU/test.so')
         self.cam_index=0
         self.connect()
         self.check_camera_mode_trg=True
@@ -295,18 +297,32 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
             if self.get_state() == PyTango.DevState.ON and self.streaming_trg==True:    
                 resolution=Modes[self.attr_Mode_read]
                 x,y=resolution.split("x")
-                self.image_rgb=np.array([[[0]*int(x)]*int(y)]*3,dtype=np.int)
-                
+                self.image_rgb=np.array([[[0]*3]*int(y)]*(int(x)),dtype=np.int)
+                name=0
                 while self.streaming_trg==True:
                     time.sleep(1)
-                    #print self.image_rgb.shape
-                    #print("0x{:016X}".format(self.mypointer))
-                    #print("Python addrs (irrelevant): effect: {:s}, effect.ptr: {:s}".format(self.hex64_str(id(self.effect)), self.hex64_str(id(self.effect.ptr))))
-                    for i in range (20):
-                       print "ir2 nr:", i, "buffer:",self.img_buffer[i].decode()
-                    #data = memoryview(cast(self.mypointer, POINTER(c_ubyte*len.value))[0]).tobytes()
-                    #print data
-                    #imageio.imsave('default.tiff', self.img_buffer.decode(]))
+                    print ord(list(self.img_buffer)[0])
+                    m=0
+                    for k in range(3):
+                        for j in range (int(y)):
+                            for i in range(int(x)):
+                                self.image_rgb[i][j][k]=ord(self.img_buffer[m])
+                                m+=1
+                    #imlist = []
+                    self.image_rgb = self.image_rgb.astype('int8')
+                    #for k in range(3):
+                    #newimage = self.image_rgb[k, :, :]
+                    #imageio.imwrite("image%d.tif" %name, self.image_rgb)
+                    img = Image.fromarray(self.image_rgb, 'RGB')
+                    img.save("out.png")
+                    #imwrite(str(name)+'temp.tif', self.image_rgb, photometric='minisblack')
+                    #for m in self.image_rgb:
+                    #    imlist.append(Image.fromarray(m.astype('uint16')))
+                    #imlist[0].save(str(name)+".tiff", compression="tiff_deflate", save_all=True, append_images=imlist[1:])
+                    name+=1                    
+                    #print self.image_rgb
+
+
             time.sleep(1)
     #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.programmer_methods
 
