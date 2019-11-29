@@ -18,7 +18,7 @@ void SaveRaw(unsigned char *buffer, unsigned int buffersize, const char* cName);
  
 //--------------------------------------------------------------------------- 
 // DEFINES 
-#define  SAVE_RAW	// save a raw 
+//#define  SAVE_RAW	// save a raw 
 //#define PRINT_MSG_2SX(ARG0, ARG1) printf("From C - [%s] (%d) - [%s]:  ARG0: [%s], ARG1: 0x%016llX\n", __FILE__, __LINE__, __FUNCTION__, ARG0, (unsigned long long)ARG1) 
 static float f = 1.618033; 
 //--------------------------------------------------------------------------- 
@@ -203,7 +203,7 @@ int set_callback(int CamIndex,void *buffer)
 	unsigned int buffersize; 
 	void* context;
 
-	global_pointer = buffer; 
+	global_pointer = buffer;
 	
 	// if active, badframes are sent to the callback with buffersize = 0 
 	result = NETUSBCAM_SetCamParameter(CamIndex,REG_CALLBACK_BR_FRAMES,1); 
