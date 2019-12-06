@@ -29,21 +29,21 @@ void *global_pointer;
  
 //--------------------------------------------------------------------------- 
 // 
-char name(int CamIndex,char **strings) 
+int name(int CamIndex,char **strings) 
 { 
 	int result = 0; 
 	char cCamName[20]; 
 	result=NETUSBCAM_GetName(CamIndex,cCamName,20); 
 	printf("Model name: %s \n\n",cCamName); 
 	strcpy(strings[0], cCamName); 
-	//return* cCamName; 
+	return result; 
 } 
 //--------------------------------------------------------------------------- 
 // 
-int main() 
+int cam_init() 
 {  
 	int result = 0; 
-	int CamIndex = 0; 	// (camera 0) 
+	int CamIndex = 0; 
 	unsigned int mode;  
 	int nXRes, nYRes, nXPos, nYPos; 
 	int size, i; 
@@ -54,16 +54,16 @@ int main()
 	result = NETUSBCAM_Init();		 
 	if(result==0){ 
 		printf("No device\n"); 
-		return 97; }		 
+		return result; }		 
 	// open camera 
 	result = NETUSBCAM_Open(CamIndex);	  
 	if(result!=0){ 
 		printf("Error: Open; Result = %d\n", result); 
-		return 98; } 
+		return result; } 
 	return CamIndex; 
 } 
- 
- 
+
+
 //--------------------------------------------------------------------------- 
 // 
 int close(int CamIndex) 
@@ -178,18 +178,12 @@ int GetImage(void *buffer, unsigned int buffersize, void *context)
   else				// good frame arrived 
   {  
 	nGoodCnt++; 
-	//printf("\n%p, Size %d \n\n",buffer, buffersize);
-	//for (i=0; i<40;i++){
-	//	printf("%x", ((unsigned char*)buffer)[i]);
-	//}
 	memcpy(global_pointer, buffer, buffersize);
-	//PRINT_MSG_2SX("&pbuffer->ptr", &buffer->ptr); 
-	//printf("Size %d \n\n", buffersize); 
-	#ifdef SAVE_RAW 
-	char buf[24]; 
-	sprintf(buf,"Nr%d.raw",nGoodCnt); 
-	SaveRaw((unsigned char*)buffer,buffersize,buf); 
-	#endif 
+	//#ifdef SAVE_RAW 
+	//char buf[24]; 
+	//sprintf(buf,"Nr%d.raw",nGoodCnt); 
+	//SaveRaw((unsigned char*)buffer,buffersize,buf); 
+	//#endif 
   } 
      
   //printf("Got Image;  GoodFr: %d ,BadFr: %d , Size %d  \n",nGoodCnt,nBadCnt,buffersize);   

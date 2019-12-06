@@ -50,12 +50,11 @@ from ctypes import *
 import time
 import threading
 import numpy as np
-import imageio
 import struct
 import io
 import os
-import rawpy
-import ipdb
+import pdb
+#import tifffile
 Modes = {
     0:"320x240",
     1:"640x480",
@@ -80,7 +79,19 @@ buffSize = {
     8:15116544,
     9:31656960
 }
-import imageio
+
+iCube_response_code = {
+    1:"IC_ERROR",
+    0:"IC_SUCCESS",
+    -1:"IC_IF_NOT_OPEN",
+    -2:"IC_WRONG_PARAM",
+    -3:"IC_OUT_OF_MEMORY",
+    -4:"IC_ALREADY_DONE",
+    -5:"IC_WRONG_CLOCK_VAL",
+    -6:"IC_COMLIB_INIT",
+    -7:"IC_NOT_IF_STARTED",
+}
+
 from PIL import Image, ImageChops
 #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.additionnal_import
 
@@ -120,31 +131,41 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         self.attr_server_message_read = ""
         self.attr_Mode_read = 0
         self.attr_set_exposure_read = 0.0
-        self.attr_Camra_name_read = ""
         self.attr_Resolution_read = ""
         self.attr_save_image_trg_read = False
         self.attr_image_saved_check_read = 0.0
         self.attr_save_dir_read = ""
         self.attr_save_name_read = ""
         self.attr_file_prefix_read = 0
-        self.attr_accu_time_read = 0
+        self.attr_Camra_name_read = ""
+        self.attr_icube_response_read = 0
+        self.attr_camera_error_read = ""
+        self.attr_Exposure_read = 0.0
         self.attr_image_r_read = [[0]]
         self.attr_image_g_read = [[0]]
         self.attr_image_b_read = [[0]]
         #----- PROTECTED REGION ID(ICubeNS1130CU.init_device) ENABLED START -----#
         #self.so_file = '/home/sergey/bin/TangoServers/iCube/test.so'
-        print("Python {:s} on {:s}\n".format(sys.version, sys.platform))
-        self.camera = CDLL('/home/sergey/Git/iCubeNS1130CU/test.so')
-        self.cam_index=0
+        #pdb.set_trace()
+        print("Python {:s} on {:s}\n".format(sys.version, sys.platform))        
+        self.iCube_response=0
+        self.icube=CDLL('/usr/lib/libNETUSBCAM.so.0.0.0')
+        self.camera = CDLL('/home/user/Git/iCubeNS1130CU/test.so')        
+
         self.connect()
+        self.img_accu=np.array([[[0]]])
+
+        self.write_selected=0
+        #self.connect_old()
         self.check_camera_mode_trg=True
+        self.check_camera_exp_trg=True
         self.streaming_trg=False
         self.accu_trig=False
         self.image_rgb=[[[0]]]
-        if not 'get_image' in dir(self):
-            self.get_image = threading.Thread(target=self.image)
-            self.get_image.setDaemon(True)
-            self.get_image.start()    
+        if not 'image_accu' in dir(self):
+            self.image_accu = threading.Thread(target=self.accu)
+            self.image_accu.setDaemon(True)
+            self.image_accu.start()    
         if not 'save_image' in dir(self):
             self.save_image = threading.Thread(target=self.save)
             self.save_image.setDaemon(True)
@@ -178,11 +199,16 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
     def read_Mode(self, attr):
         self.debug_stream("In read_Mode()")
         #----- PROTECTED REGION ID(ICubeNS1130CU.Mode_read) ENABLED START -----#
+        #pdb.set_trace()
         if self.get_state() == PyTango.DevState.ON and self.check_camera_mode_trg==True:
-            self.attr_Mode_read=self.camera._Z7GetModei(self.cam_index)
-            self.attr_Resolution_read=Modes[self.attr_Mode_read]
-            x,y=self.attr_Resolution_read.split("x")
-            self.image_rgb=np.array([[[0]*3]*int(y)]*(int(x)),dtype=np.int)
+            mode = c_uint()
+            self.attr_icube_response_read=self.icube.NETUSBCAM_GetMode(0,byref(mode))
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="Read Mode:"+iCube_response_code[self.attr_icube_response_read]
+            else:
+                self.attr_Mode_read=mode.value
+                self.attr_Resolution_read=Modes[self.attr_Mode_read]
             self.check_camera_mode_trg=False
         attr.set_value(self.attr_Mode_read)
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Mode_read
@@ -192,7 +218,11 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         data = attr.get_write_value()
         #----- PROTECTED REGION ID(ICubeNS1130CU.Mode_write) ENABLED START -----#
         if self.get_state() == PyTango.DevState.ON:
-            self.camera._Z7SetModeii(self.cam_index,data)
+            print (data, type(data))
+            self.attr_icube_response_read=self.icube.NETUSBCAM_SetMode(0,data)
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="Set Mode:"+iCube_response_code[self.attr_icube_response_read]
             self.check_camera_mode_trg=True
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Mode_write
         
@@ -205,24 +235,31 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
                 self.img_buffer  = create_string_buffer(buffSize[self.attr_Mode_read])
                 self.mypointer = addressof(self.img_buffer)
                 self.camera._Z12set_callbackiPv.argtypes = [c_int, c_void_p]
-                callback=self.camera._Z12set_callbackiPv(self.cam_index, self.mypointer)
-                streaming=self.camera._Z15start_streamingi(self.cam_index)
-                #for i in range (len(self.img_buffer)):
-                #   print "ir2 nr:", i, "buffer:",self.img_buffer[i]                
+                callback=self.camera._Z12set_callbackiPv(self.iCube_response, self.mypointer)
+                streaming=self.camera._Z15start_streamingi(self.iCube_response)           
                 if callback==0 and streaming==0:
                     
                     self.streaming_trg=True
             elif data==False:
                 self.streaming_trg=False
-                self.camera._Z14stop_streamingi(self.cam_index)
+                self.camera._Z14stop_streamingi(self.iCube_response)
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.start_stop_streaming_write
         
     def read_set_exposure(self, attr):
         self.debug_stream("In read_set_exposure()")
         #----- PROTECTED REGION ID(ICubeNS1130CU.set_exposure_read) ENABLED START -----#
+
+        #pdb.set_trace()
+        if self.get_state() == PyTango.DevState.ON and self.check_camera_exp_trg==True:
+            exposure = c_float()#create_string_buffer(20)
+            self.attr_icube_response_read=self.icube.NETUSBCAM_GetExposure(0, byref(exposure))
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="Read Exposure:"+iCube_response_code[self.attr_icube_response_read]
+            else:
+                self.attr_set_exposure_read=exposure.value
+            self.check_camera_exp_trg==False
         attr.set_value(self.attr_set_exposure_read)
-        if self.get_state() == PyTango.DevState.ON:
-            self.attr_set_exposure_read=self.camera._Z12get_exposurei(self.cam_index)
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.set_exposure_read
         
     def write_set_exposure(self, attr):
@@ -230,15 +267,14 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         data = attr.get_write_value()
         #----- PROTECTED REGION ID(ICubeNS1130CU.set_exposure_write) ENABLED START -----#
         if self.get_state() == PyTango.DevState.ON:
-            
-            self.camera._Z12set_exposureif(self.cam_index,c_float(data))      
+            #pdb.set_trace()
+            print (data, type(data))
+            self.attr_icube_response_read=self.icube.NETUSBCAM_SetExposure(0,data)
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+            else:
+                self.check_camera_exp_trg=True
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.set_exposure_write
-        
-    def read_Camra_name(self, attr):
-        self.debug_stream("In read_Camra_name()")
-        #----- PROTECTED REGION ID(ICubeNS1130CU.Camra_name_read) ENABLED START -----#
-        attr.set_value(self.attr_Camra_name_read)
-        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Camra_name_read
         
     def read_Resolution(self, attr):
         self.debug_stream("In read_Resolution()")
@@ -310,37 +346,58 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
         self.attr_file_prefix_read=data
         #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.file_prefix_write
         
-    def write_start_stop_accu(self, attr):
-        self.debug_stream("In write_start_stop_accu()")
+    def read_Camra_name(self, attr):
+        self.debug_stream("In read_Camra_name()")
+        #----- PROTECTED REGION ID(ICubeNS1130CU.Camra_name_read) ENABLED START -----#
+        attr.set_value(self.attr_Camra_name_read)
+        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Camra_name_read
+        
+    def read_icube_response(self, attr):
+        self.debug_stream("In read_icube_response()")
+        #----- PROTECTED REGION ID(ICubeNS1130CU.icube_response_read) ENABLED START -----#
+        attr.set_value(self.attr_icube_response_read)
+        
+        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.icube_response_read
+        
+    def read_camera_error(self, attr):
+        self.debug_stream("In read_camera_error()")
+        #----- PROTECTED REGION ID(ICubeNS1130CU.camera_error_read) ENABLED START -----#
+        attr.set_value(self.attr_camera_error_read)
+        
+        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.camera_error_read
+        
+    def read_Exposure(self, attr):
+        self.debug_stream("In read_Exposure()")
+        #----- PROTECTED REGION ID(ICubeNS1130CU.Exposure_read) ENABLED START -----#
+
+        if self.get_state() == PyTango.DevState.ON and self.check_camera_exp_trg==True:
+            exposure = c_float()#create_string_buffer(20)
+            self.attr_icube_response_read=self.icube.NETUSBCAM_GetExposure(0, byref(exposure))
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="Read Exposure:"+iCube_response_code[self.attr_icube_response_read]
+            else:
+                self.attr_Exposure_read=exposure.value
+            self.check_camera_exp_trg==False
+        attr.set_value(self.attr_Exposure_read)
+        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Exposure_read
+        
+    def write_Exposure(self, attr):
+        self.debug_stream("In write_Exposure()")
         data = attr.get_write_value()
-        #----- PROTECTED REGION ID(ICubeNS1130CU.start_stop_accu_write) ENABLED START -----#
+        #----- PROTECTED REGION ID(ICubeNS1130CU.Exposure_write) ENABLED START -----#
         if self.get_state() == PyTango.DevState.ON:
-            if data==True:
-                self.img_buffer  = create_string_buffer(buffSize[self.attr_Mode_read])
-                self.pointer_img_buffer = addressof(self.img_buffer)
-                self.camera._Z12set_callbackiPv.argtypes = [c_int, c_void_p]
-                callback=self.camera._Z12set_callbackiPv(self.cam_index, self.pointer_img_buffer)
-                streaming=self.camera._Z15start_streamingi(self.cam_index)
-                if callback==0 and streaming==0:
-                    self.accu_trig=True    
-            elif data==False:
-                self.accu_trig=False
-                self.camera._Z14stop_streamingi(self.cam_index)
-        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.start_stop_accu_write
-        
-    def read_accu_time(self, attr):
-        self.debug_stream("In read_accu_time()")
-        #----- PROTECTED REGION ID(ICubeNS1130CU.accu_time_read) ENABLED START -----#
-        attr.set_value(self.attr_accu_time_read)
-        
-        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.accu_time_read
-        
-    def write_accu_time(self, attr):
-        self.debug_stream("In write_accu_time()")
-        data = attr.get_write_value()
-        #----- PROTECTED REGION ID(ICubeNS1130CU.accu_time_write) ENABLED START -----#
-        self.attr_accu_time_read=data
-        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.accu_time_write
+            print (data, type(data))
+            exposure = c_float(round(data,3))
+            print (exposure)
+            self.attr_icube_response_read=self.icube.NETUSBCAM_SetExposure(0,exposure)
+            print (self.attr_icube_response_read)
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="Write Exposure:"+iCube_response_code[self.attr_icube_response_read]
+            else:
+                self.check_camera_exp_trg=True
+        #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.Exposure_write
         
     def read_image_r(self, attr):
         self.debug_stream("In read_image_r()")
@@ -381,23 +438,42 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
     #----- PROTECTED REGION ID(ICubeNS1130CU.programmer_methods) ENABLED START -----#
         
     def connect(self):
-        self.cam_index=self.camera.main()
-        if self.cam_index==0:
-            self.set_state(PyTango.DevState.ON)
-            self.attr_server_message_read="camera is found"
-        elif self.cam_index==97:
+        self.iCube_response=self.icube.NETUSBCAM_Init()
+        if self.iCube_response==0:
             self.set_state(PyTango.DevState.FAULT)
-            self.attr_server_message_read="camera not found"
-        elif self.cam_index==98:
-            self.set_state(PyTango.DevState.FAULT)
-            self.attr_server_message_read="camera not opend"
-
-        string_buffers = [create_string_buffer(20) for i in range(2)]
-        pointers = (c_char_p*2)(*map(addressof, string_buffers))
-        self.camera._Z4nameiPPc(self.cam_index, pointers)
-        results = [s.value for s in string_buffers]
-        self.attr_Camra_name_read=results[0]
-        
+            self.attr_server_message_read="no device"
+        elif self.iCube_response!=0:
+            self.attr_icube_response_read=self.icube.NETUSBCAM_Open(0)
+            if self.attr_icube_response_read!=0:
+                self.set_state(PyTango.DevState.FAULT)
+                self.attr_camera_error_read="camera error:"+iCube_response_code[self.attr_icube_response_read]
+            else:
+                self.set_state(PyTango.DevState.ON)
+                self.attr_server_message_read=str(self.iCube_response)+" camera(s) found"
+                str_buffer  = create_string_buffer(20)
+                self.attr_icube_response_read=self.camera.NETUSBCAM_GetName(0, str_buffer,20)
+                self.attr_Camra_name_read=str_buffer.value
+                if self.attr_icube_response_read!=0:
+                    self.attr_camera_error_read="camera error:"+iCube_response_code[self.attr_icube_response_read]
+                else:
+                    self.attr_camera_error_read=iCube_response_code[self.attr_icube_response_read]
+                
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
     def save(self):
         while True:
             time.sleep(1)
@@ -410,12 +486,6 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
                     if not os.path.exists(path):
                         os.makedirs(path)
                     path+="/"+str(self.attr_file_prefix_read)+"_"+self.attr_save_name_read+"tiff"
-                    #call SAVA_RAW from C
-                    #path_c = create_string_buffer(bpath)
-                    #path_pointer = pointer(path)
-                    #self.camera._Z7SaveRawPhjPKc(self.img_buffer.raw, sizeof(self.img_buffer), path_pointer)
-                        
-                    #save from Python
                     x,y=Modes[self.attr_Mode_read].split("x")
                     imgSize=[int(x),int(y)]
                     img = Image.frombytes('RGB', imgSize, self.img_buffer_raw, 'raw')#, 'F;16')
@@ -423,20 +493,42 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
                     #self.write_save_image_trg(False)
                 self.attr_image_saved_check_read=True                
     def close(self):
-        if self.cam_index==0:
+        if self.iCube_response==0:
+            self.accu_trig=False
             self.streaming_trg=False
-            self.camera._Z14stop_streamingi(self.cam_index)
-            self.camera.close(self.cam_index)
-    def image(self):
+            self.camera._Z14stop_streamingi(self.iCube_response)
+            self.camera.close(self.iCube_response)
+    def accu(self):
         while True:
-            if self.get_state() == PyTango.DevState.ON and self.accu_trig==True: 
+            if self.get_state() == PyTango.DevState.ON and self.accu_trig==True:
+                while self.accu_trig==True:                    
+                    x,y=Modes[self.attr_Mode_read].split("x")
+                    self.img_accu=np.array([[[0]*3]*int(y)]*int(x),dtype=np.uint32)
+                    self.attr_image_r_read = np.array([[0]*int(y)]*int(x),dtype=np.uint32)
+                    self.attr_image_g_read = np.array([[0]*int(y)]*int(x),dtype=np.uint32)
+                    self.attr_image_b_read = np.array([[0]*int(y)]*int(x),dtype=np.uint32)
+                    print (type(self.img_buffer))
+                    self.img_accu=np.frombuffer(self.img_buffer.raw, dtype=np.uint8, count=-1).reshape(int(x), int(y), 3)
+                    self.attr_memory_pointer_read=self.img_buffer
+                    #print (self.img_accu.shape, self.attr_image_r_read.shape)
+                    #self.attr_image_r_read = self.img_accu[:,:,0]
+                    #self.attr_image_r_read = self.img_accu[:,:,1]
+                    #self.attr_image_r_read = self.img_accu[:,:,2]
+                    time.sleep(1)
+                    
+            time.sleep(1)
+            
+    def accu_image(self):
+        while True:
+            if self.get_state() == PyTango.DevState.ON and self.accu_trig==True:
                 while self.accu_trig==True:
                     x,y=Modes[self.attr_Mode_read].split("x")
                     imgSize=[int(x),int(y)]
-                    img = Image.frombytes('RGB', imgSize, self.img_buffer.raw, 'raw')#, 'F;16')
+                    img = Image.frombytes('I', imgSize, self.img_buffer.raw, 'raw')#, 'F;16')
                     for i in range (self.attr_accu_time_read):
-                        img=ImageChops.add(img, Image.frombytes('RGB', imgSize, self.img_buffer.raw, 'raw'), scale=1.0, offset=0)
-                        time.sleep(10)
+                        img=ImageChops.add(img, Image.frombytes('I', imgSize, self.img_buffer.raw, 'raw'), scale=1.0, offset=0)
+                        print (i)
+                        time.sleep(self.attr_accu_time_read)
                     img.save("test_python.tiff", compression="tiff_deflate", save_all=True)
                     #self.file_counter=PyTango.DeviceProxy("icube/usb/camera")
                     #self.file_counter.write_attribute("save_image_trg",True)
@@ -444,6 +536,13 @@ class ICubeNS1130CU (PyTango.Device_4Impl):
                     time.sleep(1)
                     
             time.sleep(1)
+"""
+        string_buffers = [create_string_buffer(20) for i in range(2)]
+        pointers = (c_char_p*2)(*map(addressof, string_buffers))
+        self.camera._Z4nameiPPc(self.iCube_response, pointers)
+        results = [s.value for s in string_buffers]
+        self.attr_Camra_name_read=results[0]
+""" 
     #----- PROTECTED REGION END -----#	//	ICubeNS1130CU.programmer_methods
 
 class ICubeNS1130CUClass(PyTango.DeviceClass):
@@ -492,17 +591,13 @@ class ICubeNS1130CUClass(PyTango.DeviceClass):
             PyTango.SCALAR,
             PyTango.WRITE]],
         'set_exposure':
-            [[PyTango.DevDouble,
+            [[PyTango.DevFloat,
             PyTango.SCALAR,
             PyTango.READ_WRITE],
             {
-                'max value': "633",
-                'min value': "0",
+                'max value': "630",
+                'min value': "30",
             } ],
-        'Camra_name':
-            [[PyTango.DevString,
-            PyTango.SCALAR,
-            PyTango.READ]],
         'Resolution':
             [[PyTango.DevString,
             PyTango.SCALAR,
@@ -536,17 +631,22 @@ class ICubeNS1130CUClass(PyTango.DeviceClass):
             {
                 'Memorized':"true"
             } ],
-        'start_stop_accu':
-            [[PyTango.DevBoolean,
+        'Camra_name':
+            [[PyTango.DevString,
             PyTango.SCALAR,
-            PyTango.WRITE]],
-        'accu_time':
+            PyTango.READ]],
+        'icube_response':
             [[PyTango.DevLong,
             PyTango.SCALAR,
-            PyTango.READ_WRITE],
-            {
-                'Memorized':"true"
-            } ],
+            PyTango.READ]],
+        'camera_error':
+            [[PyTango.DevString,
+            PyTango.SCALAR,
+            PyTango.READ]],
+        'Exposure':
+            [[PyTango.DevFloat,
+            PyTango.SCALAR,
+            PyTango.READ_WRITE]],
         'image_r':
             [[PyTango.DevLong,
             PyTango.IMAGE,
